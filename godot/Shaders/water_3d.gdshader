@@ -21,6 +21,9 @@ uniform sampler2D refraction_noise : hint_normal;
 uniform sampler2D foam_noise : hint_default_black;
 uniform sampler2D displacement_noise : hint_default_black;
 
+uniform sampler2D SCREEN_TEXTURE: hint_screen_texture, filter_linear_mipmap;
+uniform sampler2D DEPTH_TEXTURE: hint_depth_texture, filter_linear_mipmap;
+
 void vertex() {
 	float displacement = textureLod(
 			displacement_noise, 
@@ -30,18 +33,33 @@ void vertex() {
 	VERTEX.y += displacement * displacement_strength;
 }
 
+float get_linear_depth(sampler2D depth_texture, vec2 uv, mat4 inv_projection_matrix)
+{
+	// This is the way to reconstruct linear depth used by the Advanced Postprocessing tutorial.
+	// It might be more expensive than the manual matrix math.
+	float depth_raw = texture(depth_texture, uv).x;
+	vec3 ndc = vec3(uv * 2.0 - 1.0, depth_raw);
+	vec4 position_view = inv_projection_matrix * vec4(ndc, 1.0);
+	position_view.xyz /= position_view.w;
+	float linear_depth = -position_view.z;
+	return linear_depth;
+}
+
 void fragment() {
 	vec2 uv = SCREEN_UV + refraction_strength 
 			* (texture(refraction_noise, UV + (TIME * movement_direction) * refraction_speed).rg 
 			* 2.0 - 1.0);
 	
-	float real_depth = texture(DEPTH_TEXTURE, SCREEN_UV).r * 2.0 - 1.0;
-	real_depth = PROJECTION_MATRIX[3][2] / (real_depth + PROJECTION_MATRIX[2][2]) + VERTEX.z;
-	
-	// Get the raw linear depth from the depth texture into a  [-1, 1] range
-	float depth = texture(DEPTH_TEXTURE, uv).r * 2.0 - 1.0;
-	// Recreate linear depth of the intersecting geometry using projection matrix, and subtract the vertex of the sphere
-	depth = PROJECTION_MATRIX[3][2] / (depth + PROJECTION_MATRIX[2][2]) + VERTEX.z;
+	//float real_depth = texture(DEPTH_TEXTURE, SCREEN_UV).r * 2.0 - 1.0;
+	//real_depth = PROJECTION_MATRIX[3][2] / (real_depth + PROJECTION_MATRIX[2][2]) + VERTEX.z;
+	//
+	//// Get the raw linear depth from the depth texture into a  [-1, 1] range
+	//float depth = texture(DEPTH_TEXTURE, uv).r * 2.0 - 1.0;
+//
+	//// Recreate linear depth of the intersecting geometry using projection matrix, and subtract the vertex of the sphere
+	//depth = PROJECTION_MATRIX[3][2] / (depth + PROJECTION_MATRIX[2][2]) + VERTEX.z;
+	float real_depth = get_linear_depth(DEPTH_TEXTURE, SCREEN_UV, INV_PROJECTION_MATRIX);
+	float depth = get_linear_depth(DEPTH_TEXTURE, uv, INV_PROJECTION_MATRIX);
 	
 	depth = max(depth, real_depth);
 	
@@ -55,5 +73,7 @@ void fragment() {
 			texture(foam_noise, UV + (TIME * movement_direction) * refraction_speed).rgb) 
 			* foam_color.rgb;
 	
-	ALBEDO = out_color.rgb + foam;
+	ALBEDO = out_color.rgb + foam; 
+	ALBEDO = vec3(fract(depth));
+	ALBEDO = out_color.rgb;
 }
